@@ -1,0 +1,54 @@
+name: "Network"
+description: "本地网络健康小组件：自动识别 Wi-Fi / 蜂窝数据，显示本地 IP、网关、DNS、接口与健康状态"
+author: "miaoshououdezhi"
+icon: "network"
+
+env_schema:
+  TITLE:
+    name: 标题
+    description: 小组件标题
+    default_value: "Network"
+
+  OPEN_URL:
+    name: 点击打开 URL
+    description: 点击小组件后打开的 URL
+    default_value: "https://egernapp.com"
+
+  NETWORK_MODE:
+    name: 网络模式
+    description: auto 自动判断；wifi 强制显示 Wi-Fi；cellular 强制显示蜂窝数据
+    default_value: "auto"
+    options:
+      - auto
+      - wifi
+      - cellular
+
+  REFRESH_SECONDS:
+    name: 刷新提示秒数
+    description: 写入 widget.refreshAfter；是否立即刷新由系统调度
+    default_value: "60"
+
+  NOTIFY:
+    name: 网络变化通知
+    description: 网络变化时是否发送通知
+    default_value: "false"
+    options:
+      - "true"
+      - "false"
+
+scriptings:
+  - generic:
+      name: "Network"
+      script_url: "https://raw.githubusercontent.com/miaoshououdezhi/Scripts/refs/heads/main/Network.js"
+      timeout: 20
+      update_interval: 300
+
+  - network:
+      name: "Network Watcher"
+      script_url: "https://raw.githubusercontent.com/miaoshououdezhi/Scripts/refs/heads/main/Network.js"
+      timeout: 20
+      update_interval: 300
+
+widgets:
+  - name: "Network"
+    script_name: "Network"
