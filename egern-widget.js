@@ -1,11 +1,19 @@
+const STORAGE_KEY = "egern_realtime_network_state_v1";
+
 export default async function(ctx) {
-  const env = ctx.env || {};
+  const isWidget = typeof ctx.widgetFamily === "string";
+
+  if (!isWidget) {
+    await saveNetworkSnapshot(ctx, "network");
+    return;
+  }
+
+  await saveNetworkSnapshot(ctx, "widget");
+  return buildWidget(ctx);
+}
+
+async function saveNetworkSnapshot(ctx, source) {
   const now = new Date();
-
-  const title = env.TITLE || "Egern";
-  const openUrl = env.OPEN_URL || "https://egernapp.com";
-  const family = ctx.widgetFamily || "systemSmall";
-
   const d = ctx.device || {};
   const wifi = d.wifi || {};
   const cellular = d.cellular || {};
@@ -13,39 +21,126 @@ export default async function(ctx) {
   const ipv6 = d.ipv6 || {};
 
   const ssid = wifi.ssid || "";
+  const bssid = wifi.bssid || "";
   const carrier = cellular.carrier || "";
   const radio = cellular.radio || "";
-  const ip = ipv4.address || "";
-  const gateway = ipv4.gateway || "";
-  const iface = ipv4.interface || ipv6.interface || "";
+  const ipv4Address = ipv4.address || "";
+  const ipv4Gateway = ipv4.gateway || "";
+  const ipv4Interface = ipv4.interface || "";
+  const ipv6Address = ipv6.address || "";
+  const ipv6Interface = ipv6.interface || "";
+  const dnsServers = Array.isArray(d.dnsServers) ? d.dnsServers : [];
 
   const hasWifi = !!ssid;
   const hasCellular = !!carrier || !!radio;
 
-  // 这里是显示层判断，不是官方保证的“实际出口判断”
-  const networkType = hasWifi
-    ? "Wi-Fi"
-    : hasCellular
-      ? "蜂窝数据"
-      : "未知网络";
+  let type = "unknown";
+  if (hasWifi) type = "wifi";
+  else if (hasCellular) type = "cellular";
 
-  const networkName = hasWifi
-    ? ssid
-    : hasCellular
-      ? [carrier, radio].filter(Boolean).join(" · ")
-      : "未检测到网络名称";
+  const previous = ctx.storage.getJSON(STORAGE_KEY) || {};
 
-  const mainColor = hasWifi ? "#0A84FF" : hasCellular ? "#34C759" : "#FF9F0A";
-  const mainIcon = hasWifi ? "wifi" : hasCellular ? "antenna.radiowaves.left.and.right" : "questionmark.circle";
+  const changed =
+    previous.type !== type ||
+    previous.ssid !== ssid ||
+    previous.carrier !== carrier ||
+    previous.radio !== radio ||
+    previous.ipv4Address !== ipv4Address ||
+    previous.ipv4Interface !== ipv4Interface;
 
-  let counter = { count: 0 };
-  try {
-    counter = ctx.storage.getJSON("egern_widget_network_counter") || { count: 0 };
-    counter.count += 1;
-    counter.last = now.toISOString();
-    ctx.storage.setJSON("egern_widget_network_counter", counter);
-  } catch (e) {
-    counter = { count: 0 };
+  const state = {
+    type,
+    source,
+    changed,
+    updatedAt: now.toISOString(),
+    updateCount: Number(previous.updateCount || 0) + 1,
+
+    ssid,
+    bssid,
+    carrier,
+    radio,
+
+    ipv4Address,
+    ipv4Gateway,
+    ipv4Interface,
+
+    ipv6Address,
+    ipv6Interface,
+    dnsServers
+  };
+
+  ctx.storage.setJSON(STORAGE_KEY, state);
+
+  if (source === "network" && ctx.env?.NOTIFY === "true") {
+    const title =
+      type === "wifi"
+        ? "网络已切换：Wi-Fi"
+        : type === "cellular"
+          ? "网络已切换：蜂窝数据"
+          : "网络已变化";
+
+    const body =
+      type === "wifi"
+        ? `${ssid || "未知 Wi-Fi"}\n${ipv4Address || "无 IPv4"}`
+        : type === "cellular"
+          ? `${[carrier, radio].filter(Boolean).join(" · ") || "蜂窝数据"}\n${ipv4Address || "无 IPv4"}`
+          : `${ipv4Address || ipv4Interface || "未获取网络信息"}`;
+
+    ctx.notify({
+      title,
+      body,
+      sound: false,
+      duration: 3
+    });
+  }
+}
+
+function buildWidget(ctx) {
+  const env = ctx.env || {};
+  const title = env.TITLE || "Egern 网络";
+  const openUrl = env.OPEN_URL || "https://egernapp.com";
+  const family = ctx.widgetFamily || "systemSmall";
+  const now = new Date();
+
+  const state = ctx.storage.getJSON(STORAGE_KEY) || {};
+  const type = state.type || "unknown";
+
+  const isWifi = type === "wifi";
+  const isCellular = type === "cellular";
+
+  const modeText = isWifi ? "Wi-Fi" : isCellular ? "蜂窝数据" : "未知网络";
+  const mainName = isWifi
+    ? state.ssid || "未获取 Wi-Fi 名称"
+    : isCellular
+      ? [state.carrier, state.radio].filter(Boolean).join(" · ") || "蜂窝数据"
+      : "等待网络变化";
+
+  const ipText = state.ipv4Address || "无 IPv4";
+  const ifaceText = state.ipv4Interface || state.ipv6Interface || "无接口";
+  const gatewayText = state.ipv4Gateway || "无网关";
+
+  const accent = isWifi ? "#0A84FF" : isCellular ? "#34C759" : "#FF9F0A";
+  const iconName = isWifi
+    ? "wifi"
+    : isCellular
+      ? "antenna.radiowaves.left.and.right"
+      : "questionmark.circle";
+
+  const bgColors = isWifi
+    ? ["#08111F", "#102A47", "#123E66"]
+    : isCellular
+      ? ["#06170F", "#11351F", "#1B5730"]
+      : ["#1E1303", "#3A2505", "#553505"];
+
+  function icon(name, color = "#FFFFFF", size = 16) {
+    return {
+      type: "image",
+      src: "sf-symbol:" + name,
+      width: size,
+      height: size,
+      color,
+      resizeMode: "contain"
+    };
   }
 
   function text(value, opt = {}) {
@@ -63,32 +158,46 @@ export default async function(ctx) {
     };
   }
 
-  function icon(name, color = "#FFFFFF", size = 16) {
+  function row(label, value, symbol, color) {
     return {
-      type: "image",
-      src: "sf-symbol:" + name,
-      width: size,
-      height: size,
-      color,
-      resizeMode: "contain"
+      type: "stack",
+      direction: "row",
+      alignItems: "center",
+      gap: 6,
+      children: [
+        icon(symbol, color, 13),
+        text(label, {
+          size: 11,
+          color: "#FFFFFF88",
+          weight: "medium"
+        }),
+        { type: "spacer" },
+        text(value || "无", {
+          size: 12,
+          color: "#FFFFFF",
+          weight: "semibold",
+          align: "right",
+          maxLines: 1,
+          minScale: 0.45
+        })
+      ]
     };
   }
 
-  function root(children, opt = {}) {
+  function root(children, padding = 12, gap = 8) {
     return {
       type: "widget",
       url: openUrl,
+
+      // 提示小组件尽快刷新；是否完全按这个时间执行由系统调度决定，文档未提及强制刷新能力
       refreshAfter: new Date(now.getTime() + 60 * 1000).toISOString(),
-      padding: opt.padding || 14,
-      gap: opt.gap || 8,
+
+      padding,
+      gap,
       backgroundGradient: {
         type: "linear",
-        colors: hasWifi
-          ? ["#0B1220", "#10233D", "#123A5A"]
-          : hasCellular
-            ? ["#061B12", "#123322", "#1D4D31"]
-            : ["#1F1300", "#3B2605", "#4A3008"],
-        stops: [0, 0.55, 1],
+        colors: bgColors,
+        stops: [0, 0.58, 1],
         startPoint: { x: 0, y: 0 },
         endPoint: { x: 1, y: 1 }
       },
@@ -96,14 +205,14 @@ export default async function(ctx) {
     };
   }
 
-  function header() {
+  function header(compact = false) {
     return {
       type: "stack",
       direction: "row",
       alignItems: "center",
       gap: 8,
       children: [
-        icon(mainIcon, mainColor, 27),
+        icon(iconName, accent, compact ? 25 : 28),
         {
           type: "stack",
           direction: "column",
@@ -111,13 +220,13 @@ export default async function(ctx) {
           flex: 1,
           children: [
             text(title, {
-              size: 20,
+              size: compact ? 18 : 21,
               weight: "bold"
             }),
-            text(networkType, {
-              size: 11,
-              weight: "semibold",
-              color: mainColor
+            text(modeText, {
+              size: compact ? 11 : 12,
+              weight: "bold",
+              color: accent
             })
           ]
         },
@@ -126,7 +235,7 @@ export default async function(ctx) {
           date: now.toISOString(),
           format: "time",
           font: {
-            size: 13,
+            size: compact ? 13 : 14,
             weight: "semibold"
           },
           textColor: "#FFFFFFCC",
@@ -137,7 +246,7 @@ export default async function(ctx) {
     };
   }
 
-  function bigStatusCard() {
+  function mainCard() {
     return {
       type: "stack",
       direction: "column",
@@ -146,7 +255,10 @@ export default async function(ctx) {
       backgroundColor: "#FFFFFF13",
       borderRadius: 16,
       borderWidth: 1,
-      borderColor: mainColor + "66",
+      borderColor: accent + "66",
+      shadowColor: "#00000055",
+      shadowRadius: 8,
+      shadowOffset: { x: 0, y: 3 },
       children: [
         {
           type: "stack",
@@ -154,29 +266,29 @@ export default async function(ctx) {
           alignItems: "center",
           gap: 6,
           children: [
-            icon(mainIcon, mainColor, 15),
-            text(networkType, {
+            icon(iconName, accent, 15),
+            text(modeText, {
               size: 12,
               weight: "semibold",
               color: "#FFFFFFAA"
             }),
             { type: "spacer" },
-            text(hasWifi ? "无线" : hasCellular ? "移动" : "未知", {
+            text(state.source === "network" ? "已监听" : "小组件", {
               size: 12,
               weight: "bold",
-              color: mainColor,
+              color: accent,
               align: "right"
             })
           ]
         },
-        text(networkName, {
+        text(mainName, {
           size: 17,
           weight: "bold",
           color: "#FFFFFF",
           maxLines: 1,
           minScale: 0.45
         }),
-        text(ip || "IPv4 未获取", {
+        text(ipText, {
           size: 12,
           weight: "semibold",
           color: "#FFFFFFCC",
@@ -187,38 +299,12 @@ export default async function(ctx) {
     };
   }
 
-  function miniRow(label, value, symbol, color) {
-    return {
-      type: "stack",
-      direction: "row",
-      alignItems: "center",
-      gap: 6,
-      children: [
-        icon(symbol, color, 13),
-        text(label, {
-          size: 11,
-          weight: "medium",
-          color: "#FFFFFF88"
-        }),
-        { type: "spacer" },
-        text(value || "无", {
-          size: 12,
-          weight: "semibold",
-          color: "#FFFFFF",
-          align: "right",
-          maxLines: 1,
-          minScale: 0.45
-        })
-      ]
-    };
-  }
-
   if (family === "accessoryInline") {
     return {
       type: "widget",
       url: openUrl,
       children: [
-        text(`${networkType} · ${networkName}`, {
+        text(`${modeText} · ${mainName}`, {
           size: "caption1",
           weight: "semibold",
           maxLines: 1
@@ -234,8 +320,8 @@ export default async function(ctx) {
       padding: 4,
       gap: 2,
       children: [
-        icon(mainIcon, mainColor, 24),
-        text(hasWifi ? "WiFi" : hasCellular ? "蜂窝" : "未知", {
+        icon(iconName, accent, 24),
+        text(isWifi ? "WiFi" : isCellular ? "蜂窝" : "未知", {
           size: "caption2",
           weight: "bold",
           align: "center"
@@ -251,18 +337,18 @@ export default async function(ctx) {
       padding: 6,
       gap: 3,
       children: [
-        text(networkType, {
+        text(modeText, {
           size: "caption1",
           weight: "bold",
-          color: mainColor
+          color: accent
         }),
-        text(networkName, {
+        text(mainName, {
           size: "caption2",
           weight: "medium",
           color: "#FFFFFFDD",
           maxLines: 1
         }),
-        text(ip || iface || "等待刷新", {
+        text(ipText, {
           size: "caption2",
           weight: "semibold",
           color: "#FFFFFFAA",
@@ -275,31 +361,44 @@ export default async function(ctx) {
   if (family === "systemSmall") {
     return root(
       [
-        header(),
-        bigStatusCard(),
-        miniRow("接口", iface || "无", "switch.2", "#BF5AF2"),
-        miniRow("刷新", `${counter.count} 次`, "arrow.clockwise.circle.fill", "#34C759")
+        header(true),
+        mainCard(),
+        row("接口", ifaceText, "switch.2", "#BF5AF2"),
+        row("更新", `${state.updateCount || 0} 次`, "arrow.clockwise.circle.fill", "#34C759")
       ],
-      {
-        padding: 12,
-        gap: 8
-      }
+      12,
+      8
     );
   }
 
-  const children = [
-    header(),
-    bigStatusCard(),
-    miniRow("Wi-Fi", ssid || "无", "wifi", "#0A84FF"),
-    miniRow("蜂窝", carrier || "无", "antenna.radiowaves.left.and.right", "#34C759"),
-    miniRow("制式", radio || "无", "dot.radiowaves.left.and.right", "#34C759"),
-    miniRow("IPv4", ip || "无", "globe", "#34C759"),
-    miniRow("网关", gateway || "无", "point.3.connected.trianglepath.dotted", "#FF9F0A"),
-    miniRow("接口", iface || "无", "switch.2", "#BF5AF2")
-  ];
+  const dnsText = Array.isArray(state.dnsServers) && state.dnsServers.length
+    ? state.dnsServers.join(", ")
+    : "无 DNS";
 
-  return root(children, {
-    padding: 16,
-    gap: 9
-  });
+  return root(
+    [
+      header(false),
+      mainCard(),
+      row("Wi-Fi", state.ssid || "无", "wifi", "#0A84FF"),
+      row("蜂窝", state.carrier || "无", "antenna.radiowaves.left.and.right", "#34C759"),
+      row("制式", state.radio || "无", "dot.radiowaves.left.and.right", "#34C759"),
+      row("IPv4", ipText, "globe", "#34C759"),
+      row("网关", gatewayText, "point.3.connected.trianglepath.dotted", "#FF9F0A"),
+      row("接口", ifaceText, "switch.2", "#BF5AF2"),
+      row("DNS", dnsText, "server.rack", "#BF5AF2"),
+      {
+        type: "date",
+        date: state.updatedAt || now.toISOString(),
+        format: "relative",
+        font: {
+          size: 11,
+          weight: "medium"
+        },
+        textColor: "#FFFFFF88",
+        maxLines: 1
+      }
+    ],
+    16,
+    9
+  );
 }
