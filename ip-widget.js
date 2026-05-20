@@ -1,4 +1,4 @@
- export default async function(ctx) {
+export default async function(ctx) {
   const env = ctx.env || {};
   const family = ctx.widgetFamily || 'systemSmall';
 
@@ -39,7 +39,7 @@
   if (family === 'systemMedium') return renderMedium(data);
   if (family === 'systemLarge') return renderLarge(data);
   return renderSmall(data);
-};
+}
 
 async function getProxyExitIP(ctx, env) {
   const apiUrl = clean(env.IP_API_URL);
@@ -130,7 +130,6 @@ function renderSmall(d) {
       font: {
         size: 32,
         weight: 'medium',
-        family: 'Avenir Next',
       },
       textColor: '#D8DAE8',
       maxLines: 1,
@@ -196,7 +195,6 @@ function renderMedium(d) {
               font: {
                 size: 30,
                 weight: 'medium',
-                family: 'Avenir Next',
               },
               textColor: '#D8DAE8',
               maxLines: 1,
@@ -252,7 +250,6 @@ function renderLarge(d) {
       font: {
         size: 34,
         weight: 'medium',
-        family: 'Avenir Next',
       },
       textColor: '#D8DAE8',
       maxLines: 1,
