@@ -11,19 +11,13 @@ export default async function(ctx) {
   const nowISO = new Date().toISOString();
   const refreshAfter = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
-  const publicResult = await getPublicIP(ctx, env);
-
-  const localIPv4 = clean(ipv4.address);
-  const localIPv6 = clean(ipv6.address);
-
-  const publicIP = clean(publicResult.ip);
-  const primaryIP = publicIP || localIPv4 || localIPv6 || '未获取';
-  const primaryTitle = publicIP ? '公网 IP' : '本机 IP';
+  const exitResult = await getProxyExitIP(ctx, env);
+  const exitIP = clean(exitResult.ip);
 
   let ipInfo = null;
   try {
-    if (primaryIP && primaryIP !== '未获取') {
-      ipInfo = ctx.lookupIP(primaryIP);
+    if (exitIP) {
+      ipInfo = ctx.lookupIP(exitIP);
     }
   } catch (_) {
     ipInfo = null;
@@ -39,10 +33,9 @@ export default async function(ctx) {
     nowISO,
     refreshAfter,
 
-    primaryTitle,
-    primaryIP,
-    publicIP,
-    publicNote: publicResult.note,
+    exitIP: exitIP || '获取失败',
+    exitStatus: exitResult.note,
+    policy: exitResult.policy || '默认策略',
 
     country: ipInfo?.country || '—',
     asn: ipInfo?.asn ? `AS${ipInfo.asn}` : '—',
@@ -52,8 +45,8 @@ export default async function(ctx) {
     ssid: clean(wifi.ssid) || '—',
     bssid: clean(wifi.bssid) || '—',
 
-    localIPv4: localIPv4 || '—',
-    localIPv6: localIPv6 || '—',
+    localIPv4: clean(ipv4.address) || '—',
+    localIPv6: clean(ipv6.address) || '—',
     gateway: clean(ipv4.gateway) || '—',
     iface4: clean(ipv4.interface) || '—',
     iface6: clean(ipv6.interface) || '—',
@@ -71,24 +64,32 @@ export default async function(ctx) {
   return renderMedium(data);
 };
 
-async function getPublicIP(ctx, env) {
-  const manualIP = clean(env.IP || env.TARGET_IP);
-  if (manualIP) {
-    return { ip: manualIP, note: '手动指定' };
+async function getProxyExitIP(ctx, env) {
+  const apiUrl = clean(env.IP_API_URL);
+
+  if (!apiUrl) {
+    return {
+      ip: '',
+      note: '未配置 IP_API_URL',
+      policy: clean(env.POLICY || env.POLICY_DESCRIPTOR) || '默认策略',
+    };
   }
 
-  const apiUrl = clean(env.IP_API_URL);
-  if (!apiUrl) {
-    return { ip: '', note: '未配置公网接口' };
-  }
+  const policy = clean(env.POLICY);
+  const policyDescriptor = clean(env.POLICY_DESCRIPTOR);
+
+  const options = {
+    timeout: Number(env.TIMEOUT || 8000),
+    credentials: 'omit',
+  };
+
+  if (policy) options.policy = policy;
+  if (policyDescriptor) options.policyDescriptor = policyDescriptor;
 
   try {
-    const resp = await ctx.http.get(apiUrl, {
-      timeout: Number(env.TIMEOUT || 8000),
-      credentials: 'omit',
-    });
-
+    const resp = await ctx.http.get(apiUrl, options);
     const text = await resp.text();
+
     let ip = '';
 
     try {
@@ -107,22 +108,27 @@ async function getPublicIP(ctx, env) {
 
     return {
       ip,
-      note: ip ? '接口读取' : '接口未返回 IP',
+      note: ip ? '代理出口' : '接口未返回 IP',
+      policy: policy || policyDescriptor || '默认策略',
     };
   } catch (_) {
-    return { ip: '', note: '公网读取失败' };
+    return {
+      ip: '',
+      note: '请求失败',
+      policy: policy || policyDescriptor || '默认策略',
+    };
   }
 }
 
 function renderSmall(d) {
   return root(d, [
-    header('IP 卡片', 'sf-symbol:globe', '#FFFFFF'),
+    header('我的IP', 'sf-symbol:globe'),
 
     { type: 'spacer', length: 4 },
 
     {
       type: 'text',
-      text: d.primaryTitle,
+      text: 'Exit IP',
       font: { size: 'caption1', weight: 'semibold' },
       textColor: '#FFFFFFB8',
       maxLines: 1,
@@ -130,17 +136,14 @@ function renderSmall(d) {
 
     {
       type: 'text',
-      text: d.primaryIP,
+      text: d.exitIP,
       font: { size: 18, weight: 'bold', family: 'Menlo' },
       textColor: '#FFFFFF',
       maxLines: 1,
       minScale: 0.45,
     },
 
-    pill(
-      d.publicIP ? `${d.country} · ${d.asn}` : d.networkName,
-      'sf-symbol:location.fill'
-    ),
+    pill(`${d.country} · ${d.asn}`, 'sf-symbol:location.fill'),
 
     { type: 'spacer' },
 
@@ -150,7 +153,7 @@ function renderSmall(d) {
 
 function renderMedium(d) {
   return root(d, [
-    header('网络 IP 状态', 'sf-symbol:network', '#FFFFFF'),
+    header('我的IP', 'sf-symbol:globe'),
 
     {
       type: 'stack',
@@ -158,9 +161,9 @@ function renderMedium(d) {
       gap: 10,
       children: [
         glassCard([
-          label('主地址', 'sf-symbol:globe'),
-          bigMono(d.primaryIP),
-          subText(`${d.primaryTitle} · ${d.publicNote}`),
+          label('代理出口', 'sf-symbol:paperplane.fill'),
+          bigMono(d.exitIP),
+          subText(`${d.exitStatus} · ${d.policy}`),
           miniLine('归属', `${d.country} · ${d.asn}`),
           miniLine('组织', d.organization),
         ], 1),
@@ -183,11 +186,11 @@ function renderMedium(d) {
 
 function renderLarge(d) {
   return root(d, [
-    header('IP 与网络信息', 'sf-symbol:globe.asia.australia.fill', '#FFFFFF'),
+    header('我的IP', 'sf-symbol:globe.asia.australia.fill'),
 
     glassCard([
-      label(d.primaryTitle, 'sf-symbol:location.fill'),
-      bigMono(d.primaryIP),
+      label('代理出口 IP', 'sf-symbol:paperplane.fill'),
+      bigMono(d.exitIP),
       {
         type: 'stack',
         direction: 'row',
@@ -195,9 +198,10 @@ function renderLarge(d) {
         children: [
           pill(d.country, 'sf-symbol:flag.fill'),
           pill(d.asn, 'sf-symbol:number'),
-          pill(d.publicNote, 'sf-symbol:bolt.fill'),
+          pill(d.policy, 'sf-symbol:bolt.fill'),
         ],
       },
+      miniLine('状态', d.exitStatus),
       miniLine('组织', d.organization),
     ]),
 
@@ -253,7 +257,7 @@ function root(d, children, padding, gap) {
   };
 }
 
-function header(title, icon, color) {
+function header(title, icon) {
   return {
     type: 'stack',
     direction: 'row',
@@ -265,7 +269,7 @@ function header(title, icon, color) {
         src: icon,
         width: 18,
         height: 18,
-        color,
+        color: '#FFFFFF',
       },
       {
         type: 'text',
