@@ -1,15 +1,10 @@
-export default async function(ctx) {
+ export default async function(ctx) {
   const env = ctx.env || {};
-  const family = ctx.widgetFamily || 'systemMedium';
-
-  const device = ctx.device || {};
-  const ipv4 = device.ipv4 || {};
-  const ipv6 = device.ipv6 || {};
-  const wifi = device.wifi || {};
-  const cellular = device.cellular || {};
+  const family = ctx.widgetFamily || 'systemSmall';
 
   const nowISO = new Date().toISOString();
-  const refreshAfter = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const refreshMinutes = Number(env.REFRESH_MINUTES || 10);
+  const refreshAfter = new Date(Date.now() + refreshMinutes * 60 * 1000).toISOString();
 
   const exitResult = await getProxyExitIP(ctx, env);
   const exitIP = clean(exitResult.ip);
@@ -23,45 +18,27 @@ export default async function(ctx) {
     ipInfo = null;
   }
 
-  const networkName =
-    clean(wifi.ssid) ||
-    [clean(cellular.carrier), clean(cellular.radio)].filter(Boolean).join(' ') ||
-    '未知网络';
+  const country = ipInfo?.country || '—';
+  const asn = ipInfo?.asn ? `AS${ipInfo.asn}` : '—';
+  const organization = ipInfo?.organization || '—';
+  const flag = countryFlag(country);
 
   const data = {
     family,
     nowISO,
     refreshAfter,
-
     exitIP: exitIP || '获取失败',
-    exitStatus: exitResult.note,
+    country,
+    flag,
+    asn,
+    organization,
+    status: exitResult.note,
     policy: exitResult.policy || '默认策略',
-
-    country: ipInfo?.country || '—',
-    asn: ipInfo?.asn ? `AS${ipInfo.asn}` : '—',
-    organization: ipInfo?.organization || '—',
-
-    networkName,
-    ssid: clean(wifi.ssid) || '—',
-    bssid: clean(wifi.bssid) || '—',
-
-    localIPv4: clean(ipv4.address) || '—',
-    localIPv6: clean(ipv6.address) || '—',
-    gateway: clean(ipv4.gateway) || '—',
-    iface4: clean(ipv4.interface) || '—',
-    iface6: clean(ipv6.interface) || '—',
-
-    carrier: clean(cellular.carrier) || '—',
-    radio: clean(cellular.radio) || '—',
-
-    dns: Array.isArray(device.dnsServers) && device.dnsServers.length
-      ? device.dnsServers.join(' · ')
-      : '—',
   };
 
-  if (family === 'systemSmall') return renderSmall(data);
+  if (family === 'systemMedium') return renderMedium(data);
   if (family === 'systemLarge') return renderLarge(data);
-  return renderMedium(data);
+  return renderSmall(data);
 };
 
 async function getProxyExitIP(ctx, env) {
@@ -70,7 +47,7 @@ async function getProxyExitIP(ctx, env) {
   if (!apiUrl) {
     return {
       ip: '',
-      note: '未配置 IP_API_URL',
+      note: '未配置接口',
       policy: clean(env.POLICY || env.POLICY_DESCRIPTOR) || '默认策略',
     };
   }
@@ -108,7 +85,7 @@ async function getProxyExitIP(ctx, env) {
 
     return {
       ip,
-      note: ip ? '代理出口' : '接口未返回 IP',
+      note: ip ? '代理出口' : '接口无 IP',
       policy: policy || policyDescriptor || '默认策略',
     };
   } catch (_) {
@@ -121,322 +98,296 @@ async function getProxyExitIP(ctx, env) {
 }
 
 function renderSmall(d) {
-  return root(d, [
-    header('我的IP', 'sf-symbol:globe'),
-
-    { type: 'spacer', length: 4 },
+  return cardRoot(d, [
+    topBar(),
 
     {
-      type: 'text',
-      text: 'Exit IP',
-      font: { size: 'caption1', weight: 'semibold' },
-      textColor: '#FFFFFFB8',
-      maxLines: 1,
+      type: 'spacer',
+      length: 14,
     },
 
     {
       type: 'text',
       text: d.exitIP,
-      font: { size: 18, weight: 'bold', family: 'Menlo' },
+      font: {
+        size: 38,
+        weight: 'regular',
+        family: 'Avenir Next',
+      },
       textColor: '#FFFFFF',
       maxLines: 1,
-      minScale: 0.45,
+      minScale: 0.38,
     },
 
-    pill(`${d.country} · ${d.asn}`, 'sf-symbol:location.fill'),
+    {
+      type: 'spacer',
+      length: 18,
+    },
 
-    { type: 'spacer' },
+    {
+      type: 'text',
+      text: `${d.country} ${d.flag}`,
+      font: {
+        size: 32,
+        weight: 'medium',
+        family: 'Avenir Next',
+      },
+      textColor: '#D8DAE8',
+      maxLines: 1,
+      minScale: 0.6,
+    },
 
-    updated(d.nowISO),
-  ], 14, 8);
+    {
+      type: 'spacer',
+      length: 18,
+    },
+
+    {
+      type: 'text',
+      text: `${d.asn} ${d.organization}`,
+      font: {
+        size: 25,
+        weight: 'regular',
+        family: 'Avenir Next',
+      },
+      textColor: '#B5B7C7',
+      maxLines: 2,
+      minScale: 0.45,
+    },
+  ]);
 }
 
 function renderMedium(d) {
-  return root(d, [
-    header('我的IP', 'sf-symbol:globe'),
+  return cardRoot(d, [
+    topBar(),
+
+    {
+      type: 'spacer',
+      length: 10,
+    },
 
     {
       type: 'stack',
       direction: 'row',
-      gap: 10,
+      alignItems: 'center',
+      gap: 14,
       children: [
-        glassCard([
-          label('代理出口', 'sf-symbol:paperplane.fill'),
-          bigMono(d.exitIP),
-          subText(`${d.exitStatus} · ${d.policy}`),
-          miniLine('归属', `${d.country} · ${d.asn}`),
-          miniLine('组织', d.organization),
-        ], 1),
-
-        glassCard([
-          label('本机网络', 'sf-symbol:wifi'),
-          miniLine('网络', d.networkName),
-          miniLine('IPv4', d.localIPv4),
-          miniLine('IPv6', d.localIPv6),
-          miniLine('网关', d.gateway),
-        ], 1),
+        {
+          type: 'stack',
+          direction: 'column',
+          gap: 12,
+          flex: 1,
+          children: [
+            {
+              type: 'text',
+              text: d.exitIP,
+              font: {
+                size: 36,
+                weight: 'regular',
+                family: 'Avenir Next',
+              },
+              textColor: '#FFFFFF',
+              maxLines: 1,
+              minScale: 0.38,
+            },
+            {
+              type: 'text',
+              text: `${d.country} ${d.flag}`,
+              font: {
+                size: 30,
+                weight: 'medium',
+                family: 'Avenir Next',
+              },
+              textColor: '#D8DAE8',
+              maxLines: 1,
+            },
+          ],
+        },
+        {
+          type: 'stack',
+          direction: 'column',
+          gap: 8,
+          flex: 1,
+          children: [
+            infoLine('ASN', d.asn),
+            infoLine('组织', d.organization),
+            infoLine('策略', d.policy),
+          ],
+        },
       ],
     },
-
-    { type: 'spacer' },
-
-    updated(d.nowISO),
-  ], 16, 10);
+  ]);
 }
 
 function renderLarge(d) {
-  return root(d, [
-    header('我的IP', 'sf-symbol:globe.asia.australia.fill'),
+  return cardRoot(d, [
+    topBar(),
 
-    glassCard([
-      label('代理出口 IP', 'sf-symbol:paperplane.fill'),
-      bigMono(d.exitIP),
-      {
-        type: 'stack',
-        direction: 'row',
-        gap: 8,
-        children: [
-          pill(d.country, 'sf-symbol:flag.fill'),
-          pill(d.asn, 'sf-symbol:number'),
-          pill(d.policy, 'sf-symbol:bolt.fill'),
-        ],
+    {
+      type: 'spacer',
+      length: 16,
+    },
+
+    {
+      type: 'text',
+      text: d.exitIP,
+      font: {
+        size: 44,
+        weight: 'regular',
+        family: 'Avenir Next',
       },
-      miniLine('状态', d.exitStatus),
-      miniLine('组织', d.organization),
-    ]),
+      textColor: '#FFFFFF',
+      maxLines: 1,
+      minScale: 0.38,
+    },
+
+    {
+      type: 'spacer',
+      length: 18,
+    },
+
+    {
+      type: 'text',
+      text: `${d.country} ${d.flag}`,
+      font: {
+        size: 34,
+        weight: 'medium',
+        family: 'Avenir Next',
+      },
+      textColor: '#D8DAE8',
+      maxLines: 1,
+    },
+
+    {
+      type: 'spacer',
+      length: 18,
+    },
+
+    {
+      type: 'text',
+      text: `${d.asn} ${d.organization}`,
+      font: {
+        size: 28,
+        weight: 'regular',
+        family: 'Avenir Next',
+      },
+      textColor: '#B5B7C7',
+      maxLines: 2,
+      minScale: 0.5,
+    },
+
+    {
+      type: 'spacer',
+      length: 16,
+    },
 
     {
       type: 'stack',
-      direction: 'row',
+      direction: 'column',
       gap: 10,
+      padding: 16,
+      backgroundColor: 'rgba(255,255,255,0.10)',
+      borderRadius: 24,
       children: [
-        glassCard([
-          label('本机地址', 'sf-symbol:desktopcomputer'),
-          miniLine('IPv4', d.localIPv4),
-          miniLine('接口', d.iface4),
-          miniLine('IPv6', d.localIPv6),
-          miniLine('接口', d.iface6),
-        ], 1),
-
-        glassCard([
-          label('连接信息', 'sf-symbol:wifi'),
-          miniLine('Wi-Fi', d.ssid),
-          miniLine('BSSID', d.bssid),
-          miniLine('蜂窝', d.carrier),
-          miniLine('制式', d.radio),
-        ], 1),
+        infoLine('状态', d.status),
+        infoLine('策略', d.policy),
+        infoLine('刷新', '自动'),
       ],
     },
-
-    glassCard([
-      label('DNS 与网关', 'sf-symbol:server.rack'),
-      miniLine('网关', d.gateway),
-      miniLine('DNS', d.dns),
-    ]),
-
-    { type: 'spacer' },
-
-    updated(d.nowISO),
-  ], 16, 10);
+  ]);
 }
 
-function root(d, children, padding, gap) {
+function cardRoot(d, children) {
   return {
     type: 'widget',
     refreshAfter: d.refreshAfter,
-    padding,
-    gap,
+    padding: 24,
+    gap: 0,
     backgroundGradient: {
       type: 'linear',
-      colors: ['#0F172A', '#1D4ED8', '#06B6D4'],
-      stops: [0, 0.58, 1],
+      colors: [
+        '#12131A',
+        '#1B1D2A',
+        '#23263A',
+        '#6D5DFB',
+        '#00D4FF',
+      ],
+      stops: [0, 0.42, 0.72, 0.9, 1],
       startPoint: { x: 0, y: 0 },
       endPoint: { x: 1, y: 1 },
     },
+    borderRadius: 42,
     children,
   };
 }
 
-function header(title, icon) {
+function topBar() {
   return {
     type: 'stack',
     direction: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 14,
     children: [
       {
         type: 'image',
-        src: icon,
-        width: 18,
-        height: 18,
-        color: '#FFFFFF',
+        src: 'sf-symbol:globe',
+        width: 38,
+        height: 38,
+        color: '#2F8CFF',
       },
       {
         type: 'text',
-        text: title,
-        font: { size: 'headline', weight: 'bold' },
-        textColor: '#FFFFFF',
+        text: '我的 IP',
+        font: {
+          size: 32,
+          weight: 'medium',
+          family: 'Avenir Next',
+        },
+        textColor: '#B7B9C8',
         maxLines: 1,
         minScale: 0.7,
       },
-      { type: 'spacer' },
+      {
+        type: 'spacer',
+      },
     ],
   };
 }
 
-function glassCard(children, flex) {
-  const card = {
+function infoLine(name, value) {
+  return {
     type: 'stack',
-    direction: 'column',
+    direction: 'row',
+    alignItems: 'center',
     gap: 8,
-    padding: 12,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    shadowColor: 'rgba(0,0,0,0.28)',
-    shadowRadius: 12,
-    shadowOffset: { x: 0, y: 6 },
-    children,
-  };
-
-  if (flex) card.flex = flex;
-  return card;
-}
-
-function label(text, icon) {
-  return {
-    type: 'stack',
-    direction: 'row',
-    alignItems: 'center',
-    gap: 6,
-    children: [
-      {
-        type: 'image',
-        src: icon,
-        width: 14,
-        height: 14,
-        color: '#FFFFFFD9',
-      },
-      {
-        type: 'text',
-        text,
-        font: { size: 'caption1', weight: 'semibold' },
-        textColor: '#FFFFFFD9',
-        maxLines: 1,
-      },
-      { type: 'spacer' },
-    ],
-  };
-}
-
-function bigMono(text) {
-  return {
-    type: 'text',
-    text,
-    font: { size: 20, weight: 'bold', family: 'Menlo' },
-    textColor: '#FFFFFF',
-    maxLines: 1,
-    minScale: 0.45,
-  };
-}
-
-function subText(text) {
-  return {
-    type: 'text',
-    text,
-    font: { size: 'caption1', weight: 'medium' },
-    textColor: '#FFFFFFA8',
-    maxLines: 1,
-    minScale: 0.6,
-  };
-}
-
-function miniLine(name, value) {
-  return {
-    type: 'stack',
-    direction: 'row',
-    alignItems: 'center',
-    gap: 6,
     children: [
       {
         type: 'text',
         text: name,
-        font: { size: 'caption1', weight: 'medium' },
-        textColor: '#FFFFFF99',
+        font: {
+          size: 15,
+          weight: 'medium',
+          family: 'Avenir Next',
+        },
+        textColor: '#9EA1B5',
         maxLines: 1,
       },
-      { type: 'spacer' },
+      {
+        type: 'spacer',
+      },
       {
         type: 'text',
         text: clean(value) || '—',
-        font: { size: 'caption1', weight: 'semibold' },
+        font: {
+          size: 15,
+          weight: 'semibold',
+          family: 'Avenir Next',
+        },
         textColor: '#FFFFFF',
         textAlign: 'right',
         maxLines: 1,
-        minScale: 0.45,
+        minScale: 0.5,
       },
-    ],
-  };
-}
-
-function pill(text, icon) {
-  return {
-    type: 'stack',
-    direction: 'row',
-    alignItems: 'center',
-    gap: 5,
-    padding: [5, 8],
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    borderRadius: 999,
-    children: [
-      {
-        type: 'image',
-        src: icon,
-        width: 11,
-        height: 11,
-        color: '#FFFFFFD9',
-      },
-      {
-        type: 'text',
-        text: clean(text) || '—',
-        font: { size: 'caption2', weight: 'semibold' },
-        textColor: '#FFFFFF',
-        maxLines: 1,
-        minScale: 0.6,
-      },
-    ],
-  };
-}
-
-function updated(dateISO) {
-  return {
-    type: 'stack',
-    direction: 'row',
-    alignItems: 'center',
-    gap: 6,
-    children: [
-      {
-        type: 'image',
-        src: 'sf-symbol:clock',
-        width: 12,
-        height: 12,
-        color: '#FFFFFFB8',
-      },
-      {
-        type: 'text',
-        text: '更新于',
-        font: { size: 'caption2', weight: 'medium' },
-        textColor: '#FFFFFFA8',
-      },
-      {
-        type: 'date',
-        date: dateISO,
-        format: 'relative',
-        font: { size: 'caption2', weight: 'medium' },
-        textColor: '#FFFFFFD0',
-      },
-      { type: 'spacer' },
     ],
   };
 }
@@ -456,4 +407,17 @@ function extractIP(value) {
   if (ipv6) return ipv6[0];
 
   return '';
+}
+
+function countryFlag(countryCode) {
+  const code = clean(countryCode).toUpperCase();
+
+  if (!/^[A-Z]{2}$/.test(code)) {
+    return '🏳️';
+  }
+
+  return String.fromCodePoint(
+    127397 + code.charCodeAt(0),
+    127397 + code.charCodeAt(1)
+  );
 }
